@@ -1991,6 +1991,8 @@ void cmd_rename_workspace(I3_CMD, const char *old_name, const char *new_name) {
 
     /* By re-attaching, the sort order will be correct afterwards. */
     Con *previously_focused = focused;
+    Con *previously_focused_parent = focused->parent;
+    bool previously_focused_is_workspace = focused->type == CT_WORKSPACE;
     Con *parent = workspace->parent;
     con_detach(workspace);
     con_attach(workspace, parent, false);
@@ -2011,14 +2013,35 @@ void cmd_rename_workspace(I3_CMD, const char *old_name, const char *new_name) {
         }
         workspace_move_to_output(workspace, target_output);
 
-        if (previously_focused)
+        bool can_restore_focus = previously_focused != 0;
+        /* NB: If previously_focused is a workspace we can't
+         * work directly with it since it might have been cleaned up by
+         * workspace_show() already, depending on the
+         * focus order/number of other workspaces on the output.
+         * Instead, we loop through the available workspaces and only focus
+         * previously_focused if we still find it. */
+        if (previously_focused_is_workspace) {
+            Con *con = NULL;
+            bool found_workspace = false;
+            TAILQ_FOREACH(con, &(previously_focused_parent->nodes_head), nodes) {
+                if (con != previously_focused)
+                    continue;
+
+                found_workspace = true;
+
+                break;
+            }
+            can_restore_focus = can_restore_focus && found_workspace;
+        }
+
+        if (can_restore_focus) {
+            /* Restore the previous focus since con_attach messes with the focus. */
             workspace_show(con_get_workspace(previously_focused));
+            con_activate(previously_focused);
+        }
 
         break;
     }
-
-    /* Restore the previous focus since con_attach messes with the focus. */
-    con_activate(previously_focused);
 
     cmd_output->needs_tree_render = true;
     ysuccess(true);
